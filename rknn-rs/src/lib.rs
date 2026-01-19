@@ -409,42 +409,81 @@ pub mod prelude {
             if result != 0 {
                 return rkerr!("rknn_query  faild.", result);
             }
+	        println!("Model has {} inputs, {} outputs", io_num.n_input, io_num.n_output);
+	        let mut raw_attr = [0u8; 512];
 
             for i in 0..io_num.n_input {
-                let mut rknn_tensor_attr = _rknn_tensor_attr::default();
-                rknn_tensor_attr.index = i;
+		        raw_attr.fill(0);
+                raw_attr[0..4].copy_from_slice(&(i as u32).to_le_bytes());
+                //let mut rknn_tensor_attr = _rknn_tensor_attr::default();
+                //rknn_tensor_attr.index = i;
                 let result = unsafe {
                     rknn_sys::rknn_query(
                         self.context,
                         rknn_sys::_rknn_query_cmd_RKNN_QUERY_INPUT_ATTR,
-                        &mut rknn_tensor_attr as *mut _rknn_tensor_attr as *mut std::ffi::c_void,
-                        mem::size_of::<rknn_sys::_rknn_tensor_attr>() as u32,
+			            raw_attr.as_mut_ptr() as *mut std::ffi::c_void,
+                        raw_attr.len() as u32,
+                        //&mut rknn_tensor_attr as *mut _rknn_tensor_attr as *mut std::ffi::c_void,
+                        //mem::size_of::<rknn_sys::_rknn_tensor_attr>() as u32,
                     )
                 };
-                println!("{:?}", rknn_tensor_attr);
+                //println!("Input {}: {:?}", i, rknn_tensor_attr);
                 if result != 0 {
                     return rkerr!("rknn_query faild.", result);
                 }
+		        Self::parse_and_print_tensor_attr(&raw_attr, i as i32, "Input");
             }
 
             for i in 0..io_num.n_output {
-                let mut rknn_tensor_attr = _rknn_tensor_attr::default();
-                rknn_tensor_attr.index = i;
+		        raw_attr.fill(0);
+                raw_attr[0..4].copy_from_slice(&(i as u32).to_le_bytes());
+                //let mut rknn_tensor_attr = _rknn_tensor_attr::default();
+                //rknn_tensor_attr.index = i;
                 let result = unsafe {
                     rknn_sys::rknn_query(
                         self.context,
                         rknn_sys::_rknn_query_cmd_RKNN_QUERY_OUTPUT_ATTR,
-                        &mut rknn_tensor_attr as *mut _rknn_tensor_attr as *mut std::ffi::c_void,
-                        mem::size_of::<rknn_sys::_rknn_tensor_attr>() as u32,
+			            raw_attr.as_mut_ptr() as *mut std::ffi::c_void,
+                        raw_attr.len() as u32,
+                        //&mut rknn_tensor_attr as *mut _rknn_tensor_attr as *mut std::ffi::c_void,
+                        //mem::size_of::<rknn_sys::_rknn_tensor_attr>() as u32,
                     )
                 };
-                println!("{:?}", rknn_tensor_attr);
+                //println!("Output {}: {:?}", i, rknn_tensor_attr);
                 if result != 0 {
                     return rkerr!("rknn_query faild.", result);
                 }
+		        Self::parse_and_print_tensor_attr(&raw_attr, i as i32, "Output");
             }
 
             Ok(())
+        }
+
+	    fn parse_and_print_tensor_attr(raw: &[u8], idx: i32, kind: &str) {
+            let _index = u32::from_le_bytes(raw[0..4].try_into().unwrap());
+            let n_dims = u32::from_le_bytes(raw[4..8].try_into().unwrap());
+
+            let mut dims = Vec::new();
+            for d in 0..n_dims as usize {
+                let offset = 8 + d * 4;
+                let dim = u32::from_le_bytes(raw[offset..offset + 4].try_into().unwrap());
+                dims.push(dim);
+            }
+
+            let name_offset = 8 + 16 * 4;
+            let name_bytes = &raw[name_offset..name_offset + 256];
+            let name = std::str::from_utf8(
+                &name_bytes[..name_bytes
+                    .iter()
+                    .position(|&b| b == 0)
+                    .unwrap_or(256)])
+                .unwrap_or("<invalid>");
+            
+            let elems_offset = name_offset + 256;
+            let n_elems = u32::from_le_bytes(raw[elems_offset..elems_offset + 4].try_into().unwrap());
+            let size = u32::from_le_bytes(raw[elems_offset + 4..elems_offset + 8].try_into().unwrap());
+
+            println!("{} {}: name='{}', dims={:?}, n_elems={}, size={} bytes", kind, idx, name, dims, n_elems, size);
         }
 
         /// Get the model's output (raw version).
