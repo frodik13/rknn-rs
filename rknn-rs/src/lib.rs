@@ -354,8 +354,41 @@ pub mod prelude {
         ///
         /// If successful, returns `Ok(()`; otherwise, returns an `Error`.
         pub fn input_set<T: Pod + 'static>(&self, input: &mut RknnInput<T>) -> Result<(), Error> {
+            let mut c_input = Self::create_c_input(input);
+
+            let result = unsafe { rknn_sys::rknn_inputs_set(self.context, 1, &mut c_input) };
+            if result != 0 {
+                return rkerr!("rknn_inputs_set failed.", result);
+            }
+            Ok(())
+        }
+
+        pub fn inputs_set<T: Pod + 'static>(&self, inputs: &mut [RknnInput<T>]) -> Result<(), Error> {
+            let mut c_inputs: Vec<rknn_sys::rknn_input> = Vec::with_capacity(inputs.len());
+            
+            for input in inputs.iter_mut() {
+                let c_input = Self::create_c_input(input);
+                c_inputs.push(c_input);
+            }
+
+            let result = unsafe {
+                rknn_sys::rknn_inputs_set(
+                    self.context,
+                    c_inputs.len() as u32,
+                    c_inputs.as_mut_ptr(),
+                )
+            };
+
+            if result != 0 {
+                return rkerr!("rknn_inputs_set failed.", result);
+            }
+            
+            Ok(())
+        }
+
+        fn create_c_input<T: Pod + 'static>(input: &mut RknnInput<T>) -> rknn_sys::rknn_input {
             let total_bytes = (input.buf.len() * mem::size_of::<T>()) as u32;
-            let mut c_input = rknn_sys::rknn_input {
+            let c_input = rknn_sys::rknn_input {
                 index: input.index as u32,
                 buf: input.buf.as_mut_ptr() as *mut c_void,
                 size: total_bytes,
@@ -364,11 +397,7 @@ pub mod prelude {
                 fmt: input.fmt as u32,
             };
 
-            let result = unsafe { rknn_sys::rknn_inputs_set(self.context, 1, &mut c_input) };
-            if result != 0 {
-                return rkerr!("rknn_inputs_set failed.", result);
-            }
-            Ok(())
+            c_input
         }
 
         /// Run the RKNN model.
@@ -494,7 +523,7 @@ pub mod prelude {
         /// # Returns
         ///
         /// If successful, returns a `RknnOutput<'a, T>`; otherwise, returns an `Error`.
-        pub fn outputs_get<'a, T: Pod + Copy + 'static>(&'a self) -> Result<RknnOutput<'a, T>, Error> {
+        pub fn output_get<'a, T: Pod + Copy + 'static>(&'a self) -> Result<RknnOutput<'a, T>, Error> {
             let mut out = rknn_sys::rknn_output {
                 want_float: 1,
                 is_prealloc: 0,
@@ -517,6 +546,49 @@ pub mod prelude {
                 memory: t_slice,
                 raw: out,
             })
+        }
+
+        pub fn outputs_get<'a, T: Pod + Copy + 'static>(&'a self, n_outputs: u32) -> Result<Vec<RknnOutput<'a, T>>, Error> {
+            let mut results: Vec<RknnOutput<T>> = Vec::with_capacity(n_outputs as usize);
+
+            let mut outs = vec![];
+            for i in 0..n_outputs {
+                let out = rknn_sys::rknn_output {
+                    want_float: 1,
+                    is_prealloc: 0,
+                    index: i,
+                    buf: std::ptr::null_mut(),
+                    size: 0,
+                };
+
+                outs.push(out);
+            }
+
+            let result = unsafe {
+                rknn_sys::rknn_outputs_get(
+                    self.context,
+                    n_outputs,
+                    outs.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                )
+            };
+
+            if result != 0 {
+                return rkerr!("rknn_outputs_get faild.", result);
+            }
+
+            for out in outs {
+                let element_size = mem::size_of::<T>();
+                let num_elements = out.size as usize / element_size;
+                let t_slice = unsafe { slice::from_raw_parts(out.buf as *const T, num_elements) };
+                results.push(RknnOutput {
+                    context: self.context,
+                    memory: t_slice,
+                    raw: out,
+                });
+            }
+
+            Ok(results)
         }
     }
 }

@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "rknn rust binding"
-repository = "https://github.com/darkautism/rknn-rs"
+repository = "https://github.com/frodik13/rknn-rs"
 
 [dependencies]
 bytemuck = "1.23.2"
